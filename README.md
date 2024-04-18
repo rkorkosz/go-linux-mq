@@ -10,7 +10,7 @@ package main
 
 import (
     "context"
-    "github.com/rkorkosz/go-linux-mq"
+    mq "github.com/rkorkosz/go-linux-mq"
 )
 
 func main() {
@@ -28,12 +28,12 @@ func main() {
 
     priority := 0
 
-    err = mq.Send(ctx, []byte("my new msg"), priority)
+    err = q.Send(ctx, []byte("my new msg"), priority)
     if err != nil {
         panic(err)
     }
 
-    received, err := mq.Receive(ctx, priority)
+    received, err := q.Receive(ctx, priority)
     if err != nil {
         panic(err)
     }
