@@ -27,7 +27,7 @@ type mqOpenAttrs struct {
 	_       int64
 }
 
-func NewMQ(cfg Config) (*MQ, error) {
+func New(cfg Config) (*MQ, error) {
 	name, err := unix.BytePtrFromString(cfg.Name)
 	if err != nil {
 		return nil, err

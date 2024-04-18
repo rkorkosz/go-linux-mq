@@ -9,7 +9,7 @@ import (
 )
 
 func TestMQOpen(t *testing.T) {
-	mq, err := NewMQ(Config{
+	mq, err := New(Config{
 		Name:    "testopen",
 		MaxMsg:  2,
 		MsgSize: 10,
@@ -20,7 +20,7 @@ func TestMQOpen(t *testing.T) {
 }
 
 func TestMQSendReceive(t *testing.T) {
-	mq, err := NewMQ(Config{
+	mq, err := New(Config{
 		Name:    "testopen",
 		MaxMsg:  2,
 		MsgSize: 10,
