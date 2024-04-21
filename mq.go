@@ -79,13 +79,14 @@ func (mq *MQ) Send(ctx context.Context, data []byte, priority int) error {
 }
 
 func (mq *MQ) Receive(ctx context.Context, priority int) ([]byte, error) {
+	var tm uintptr
 	timeout, ok := ctx.Deadline()
-	if !ok {
-		timeout = time.Now().Add(-1)
-	}
-	t, err := unix.TimeToTimespec(timeout)
-	if err != nil {
-		return nil, err
+	if ok {
+		t, err := unix.TimeToTimespec(timeout)
+		if err != nil {
+			return nil, err
+		}
+		tm = uintptr(unsafe.Pointer(&t))
 	}
 	msgBuf := make([]byte, mq.MsgSize)
 	n, _, errno := unix.Syscall6(
@@ -94,7 +95,7 @@ func (mq *MQ) Receive(ctx context.Context, priority int) ([]byte, error) {
 		uintptr(unsafe.Pointer(&msgBuf[0])),
 		uintptr(mq.MsgSize),
 		uintptr(priority),
-		uintptr(unsafe.Pointer(&t)),
+		tm,
 		0,
 	)
 	if errno != 0 {
