@@ -1,7 +1,6 @@
 package mq
 
 import (
-	"bytes"
 	"context"
 	"time"
 	"unsafe"
@@ -89,7 +88,7 @@ func (mq *MQ) Receive(ctx context.Context, priority int) ([]byte, error) {
 		return nil, err
 	}
 	msgBuf := make([]byte, mq.MsgSize)
-	_, _, errno := unix.Syscall6(
+	n, _, errno := unix.Syscall6(
 		unix.SYS_MQ_TIMEDRECEIVE,
 		mq.ptr,
 		uintptr(unsafe.Pointer(&msgBuf[0])),
@@ -101,5 +100,5 @@ func (mq *MQ) Receive(ctx context.Context, priority int) ([]byte, error) {
 	if errno != 0 {
 		return nil, errno
 	}
-	return bytes.Trim(msgBuf, "\x00"), nil
+	return msgBuf[:n], nil
 }
