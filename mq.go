@@ -31,6 +31,7 @@ func New(cfg Config) (*MQ, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	mq, _, errno := unix.Syscall6(
 		unix.SYS_MQ_OPEN,
 		uintptr(unsafe.Pointer(name)),
@@ -46,6 +47,7 @@ func New(cfg Config) (*MQ, error) {
 	if errno != 0 {
 		return nil, errno
 	}
+
 	return &MQ{ptr: mq, MsgSize: cfg.MsgSize}, nil
 }
 
@@ -59,10 +61,12 @@ func (mq *MQ) Send(ctx context.Context, data []byte, priority int) error {
 		// sending immediately
 		timeout = time.Now().Add(-1)
 	}
+
 	t, err := unix.TimeToTimespec(timeout)
 	if err != nil {
 		return err
 	}
+
 	_, _, errno := unix.Syscall6(
 		unix.SYS_MQ_TIMEDSEND,
 		mq.ptr,
@@ -75,11 +79,13 @@ func (mq *MQ) Send(ctx context.Context, data []byte, priority int) error {
 	if errno != 0 {
 		return errno
 	}
+
 	return nil
 }
 
 func (mq *MQ) Receive(ctx context.Context, priority int) ([]byte, error) {
 	var tm uintptr
+
 	timeout, ok := ctx.Deadline()
 	if ok {
 		t, err := unix.TimeToTimespec(timeout)
@@ -88,7 +94,9 @@ func (mq *MQ) Receive(ctx context.Context, priority int) ([]byte, error) {
 		}
 		tm = uintptr(unsafe.Pointer(&t))
 	}
+
 	msgBuf := make([]byte, mq.MsgSize)
+
 	n, _, errno := unix.Syscall6(
 		unix.SYS_MQ_TIMEDRECEIVE,
 		mq.ptr,
@@ -101,5 +109,6 @@ func (mq *MQ) Receive(ctx context.Context, priority int) ([]byte, error) {
 	if errno != 0 {
 		return nil, errno
 	}
+
 	return msgBuf[:n], nil
 }
