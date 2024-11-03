@@ -1,10 +1,10 @@
 module github.com/rkorkosz/go-linux-mq
 
-go 1.22.2
+go 1.23
 
 require (
 	github.com/stretchr/testify v1.9.0
-	golang.org/x/sys v0.19.0
+	golang.org/x/sys v0.26.0
 )
 
 require (
