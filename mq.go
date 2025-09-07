@@ -2,21 +2,19 @@ package mq
 
 import (
 	"context"
+	"sync"
 	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
 
-type Config struct {
-	Name    string
-	MaxMsg  int64
-	MsgSize int64
-}
-
 type MQ struct {
+	Name    string
 	ptr     uintptr
 	MsgSize int64
+	MaxMsg  int64
+	BufPool *sync.Pool
 }
 
 type mqOpenAttrs struct {
@@ -26,20 +24,33 @@ type mqOpenAttrs struct {
 	_       int64
 }
 
-func New(cfg Config) (*MQ, error) {
-	name, err := unix.BytePtrFromString(cfg.Name)
+// New creates a new message queue with provided options.
+// It returns an error if the queue could not be created.
+func New(name string, opts ...func(*MQ)) (*MQ, error) {
+	pname, err := unix.BytePtrFromString(name)
 	if err != nil {
 		return nil, err
 	}
-
-	mq, _, errno := unix.Syscall6(
+	mq := &MQ{
+		MaxMsg:  10,
+		MsgSize: 8192,
+		BufPool: &sync.Pool{
+			New: func() any {
+				return make([]byte, 8192)
+			},
+		},
+	}
+	for _, opt := range opts {
+		opt(mq)
+	}
+	smq, _, errno := unix.Syscall6(
 		unix.SYS_MQ_OPEN,
-		uintptr(unsafe.Pointer(name)),
+		uintptr(unsafe.Pointer(pname)),
 		unix.O_RDWR|unix.O_CREAT,
 		0o600,
 		uintptr(unsafe.Pointer(&mqOpenAttrs{
-			MaxMsg:  cfg.MaxMsg,
-			MsgSize: cfg.MsgSize,
+			MaxMsg:  mq.MaxMsg,
+			MsgSize: mq.MsgSize,
 		})),
 		0,
 		0,
@@ -47,14 +58,37 @@ func New(cfg Config) (*MQ, error) {
 	if errno != 0 {
 		return nil, errno
 	}
+	mq.ptr = smq
 
-	return &MQ{ptr: mq, MsgSize: cfg.MsgSize}, nil
+	return mq, nil
 }
 
+func WithMaxMessage(maxMessage int64) func(*MQ) {
+	return func(mq *MQ) {
+		mq.MaxMsg = maxMessage
+	}
+}
+
+func WithMessageSize(messageSize int64) func(*MQ) {
+	return func(mq *MQ) {
+		mq.MsgSize = messageSize
+	}
+}
+
+func WithBufferPool(pool *sync.Pool) func(*MQ) {
+	return func(mq *MQ) {
+		mq.BufPool = pool
+	}
+}
+
+// Close closes connection to the queue
 func (mq *MQ) Close() error {
 	return unix.Close(int(mq.ptr))
 }
 
+// Send sends a message to the queue with the given priority.
+// If the context is cancelled, the operation is aborted.
+// It returns an error if the message could not be sent
 func (mq *MQ) Send(ctx context.Context, data []byte, priority int) error {
 	timeout, ok := ctx.Deadline()
 	if !ok {
@@ -67,22 +101,34 @@ func (mq *MQ) Send(ctx context.Context, data []byte, priority int) error {
 		return err
 	}
 
-	_, _, errno := unix.Syscall6(
-		unix.SYS_MQ_TIMEDSEND,
-		mq.ptr,
-		uintptr(unsafe.Pointer(&data[0])),
-		uintptr(len(data)),
-		uintptr(priority),
-		uintptr(unsafe.Pointer(&t)),
-		0,
-	)
-	if errno != 0 {
-		return errno
+	for {
+		_, _, errno := unix.Syscall6(
+			unix.SYS_MQ_TIMEDSEND,
+			mq.ptr,
+			uintptr(unsafe.Pointer(&data[0])),
+			uintptr(len(data)),
+			uintptr(priority),
+			uintptr(unsafe.Pointer(&t)),
+			0,
+		)
+		if errno == 0 {
+			return nil
+		}
+		if errno != 0 {
+			return errno
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			// continue retrying
+		}
 	}
-
-	return nil
 }
 
+// Receive receives a message from the queue with the given priority.
+// If the context is cancelled, the operation is aborted.
+// It returns message body and error if the message could not be sent
 func (mq *MQ) Receive(ctx context.Context, priority int) ([]byte, error) {
 	var tm uintptr
 
@@ -95,20 +141,30 @@ func (mq *MQ) Receive(ctx context.Context, priority int) ([]byte, error) {
 		tm = uintptr(unsafe.Pointer(&t))
 	}
 
-	msgBuf := make([]byte, mq.MsgSize)
+	msgBuf := mq.BufPool.Get().([]byte)
+	defer mq.BufPool.Put(msgBuf)
 
-	n, _, errno := unix.Syscall6(
-		unix.SYS_MQ_TIMEDRECEIVE,
-		mq.ptr,
-		uintptr(unsafe.Pointer(&msgBuf[0])),
-		uintptr(mq.MsgSize),
-		uintptr(priority),
-		tm,
-		0,
-	)
-	if errno != 0 {
-		return nil, errno
+	for {
+		n, _, errno := unix.Syscall6(
+			unix.SYS_MQ_TIMEDRECEIVE,
+			mq.ptr,
+			uintptr(unsafe.Pointer(&msgBuf[0])),
+			uintptr(mq.MsgSize),
+			uintptr(priority),
+			tm,
+			0,
+		)
+		if errno == 0 {
+			return msgBuf[:n], nil
+		}
+		if errno != 0 {
+			return nil, errno
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+			// continue retrying
+		}
 	}
-
-	return msgBuf[:n], nil
 }
