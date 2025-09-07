@@ -118,6 +118,7 @@ func (mq *MQ) Send(ctx context.Context, data []byte, priority int) error {
 			return nil
 		}
 		if errno != 0 && retries == mq.Retries {
+			retries++
 			return errno
 		}
 		select {
