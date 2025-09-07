@@ -14,11 +14,7 @@ import (
 )
 
 func main() {
-    q, err := mq.New(mq.Config{
-        Name: "myqueue",
-        MaxMsg: 10,
-        MsgSize: 1 << 20, // 1 MB
-    })
+    q, err := mq.New("myqueue")
     if err != nil {
         panic(err)
     }
