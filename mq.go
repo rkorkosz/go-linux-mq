@@ -11,10 +11,11 @@ import (
 
 type MQ struct {
 	Name    string
-	ptr     uintptr
 	MsgSize int64
 	MaxMsg  int64
 	BufPool *sync.Pool
+	Retries int
+	ptr     uintptr
 }
 
 type mqOpenAttrs struct {
@@ -32,6 +33,7 @@ func New(name string, opts ...func(*MQ)) (*MQ, error) {
 		return nil, err
 	}
 	mq := &MQ{
+		Retries: 2,
 		MaxMsg:  10,
 		MsgSize: 8192,
 		BufPool: &sync.Pool{
@@ -100,6 +102,7 @@ func (mq *MQ) Send(ctx context.Context, data []byte, priority int) error {
 	if err != nil {
 		return err
 	}
+	var retries int
 
 	for {
 		_, _, errno := unix.Syscall6(
@@ -114,7 +117,7 @@ func (mq *MQ) Send(ctx context.Context, data []byte, priority int) error {
 		if errno == 0 {
 			return nil
 		}
-		if errno != 0 {
+		if errno != 0 && retries == mq.Retries {
 			return errno
 		}
 		select {
