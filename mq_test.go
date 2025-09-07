@@ -1,11 +1,9 @@
 package mq
 
 import (
+	"bytes"
 	"context"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestMQOpen(t *testing.T) {
@@ -15,11 +13,14 @@ func TestMQOpen(t *testing.T) {
 		MsgSize: 10,
 	})
 
-	assert.NoError(t, err)
+	assertNoError(t, err)
 
 	defer mq.Close()
 
-	assert.NotNil(t, mq)
+	if mq == nil {
+		t.Errorf("mq should not be nil")
+		t.FailNow()
+	}
 }
 
 func TestMQSendReceive(t *testing.T) {
@@ -29,8 +30,11 @@ func TestMQSendReceive(t *testing.T) {
 		MsgSize: 10,
 	})
 
-	require.NoError(t, err)
-	require.NotNil(t, mq)
+	requireNoError(t, err)
+	if mq == nil {
+		t.Errorf("mq should not be nil")
+		t.FailNow()
+	}
 
 	defer mq.Close()
 
@@ -39,10 +43,28 @@ func TestMQSendReceive(t *testing.T) {
 	msg := []byte("test")
 
 	err = mq.Send(ctx, msg, 0)
-	require.NoError(t, err)
+	requireNoError(t, err)
 
 	received, err := mq.Receive(ctx, 0)
-	require.NoError(t, err)
+	requireNoError(t, err)
 
-	assert.Equal(t, msg, received)
+	if !bytes.Equal(msg, received) {
+		t.Errorf("want %s, got %s", string(msg), string(received))
+	}
+}
+
+func requireNoError(t *testing.T, err error) {
+	t.Helper()
+	if !assertNoError(t, err) {
+		t.FailNow()
+	}
+}
+
+func assertNoError(t *testing.T, err error) bool {
+	t.Helper()
+	if err != nil {
+		t.Errorf("Error is not nil: %s", err)
+		return false
+	}
+	return true
 }
