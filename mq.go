@@ -83,6 +83,12 @@ func WithBufferPool(pool *sync.Pool) func(*MQ) {
 	}
 }
 
+func WithRetries(retries int) func(*MQ) {
+	return func(mq *MQ) {
+		mq.Retries = retries
+	}
+}
+
 // Close closes connection to the queue
 func (mq *MQ) Close() error {
 	return unix.Close(int(mq.ptr))
@@ -117,8 +123,8 @@ func (mq *MQ) Send(ctx context.Context, data []byte, priority int) error {
 		if errno == 0 {
 			return nil
 		}
+		retries++
 		if errno != 0 && retries == mq.Retries {
-			retries++
 			return errno
 		}
 		select {
