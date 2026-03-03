@@ -2,12 +2,18 @@ package mq
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
+
+var ErrInvalidQueueName = errors.New("invalid queue name")
 
 type MQ struct {
 	Name    string
@@ -28,23 +34,31 @@ type mqOpenAttrs struct {
 // New creates a new message queue with provided options.
 // It returns an error if the queue could not be created.
 func New(name string, opts ...func(*MQ)) (*MQ, error) {
+	if !isValidQueueName(name) {
+		return nil, ErrInvalidQueueName
+	}
 	pname, err := unix.BytePtrFromString(name)
 	if err != nil {
 		return nil, err
 	}
 	mq := &MQ{
+		Name:    name,
 		Retries: 2,
 		MaxMsg:  10,
 		MsgSize: 8192,
-		BufPool: &sync.Pool{
-			New: func() any {
-				return make([]byte, 8192)
-			},
-		},
 	}
 	for _, opt := range opts {
 		opt(mq)
 	}
+
+	if mq.BufPool == nil {
+		mq.BufPool = &sync.Pool{
+			New: func() any {
+				return make([]byte, mq.MsgSize)
+			},
+		}
+	}
+
 	smq, _, errno := unix.Syscall6(
 		unix.SYS_MQ_OPEN,
 		uintptr(unsafe.Pointer(pname)),
@@ -94,10 +108,21 @@ func (mq *MQ) Close() error {
 	return unix.Close(int(mq.ptr))
 }
 
+func (mq *MQ) CloseAndUnlink() error {
+	err := mq.Close()
+	if err != nil {
+		return err
+	}
+	return os.Remove(filepath.Join("/dev/mqueue", mq.Name[1:]))
+}
+
 // Send sends a message to the queue with the given priority.
 // If the context is cancelled, the operation is aborted.
 // It returns an error if the message could not be sent
 func (mq *MQ) Send(ctx context.Context, data []byte, priority int) error {
+	if len(data) == 0 {
+		return nil
+	}
 	timeout, ok := ctx.Deadline()
 	if !ok {
 		// sending immediately
@@ -136,23 +161,24 @@ func (mq *MQ) Send(ctx context.Context, data []byte, priority int) error {
 	}
 }
 
-// Receive receives a message from the queue with the given priority.
+// Receive receives a message from the queue.
 // If the context is cancelled, the operation is aborted.
 // It returns message body and error if the message could not be sent
-func (mq *MQ) Receive(ctx context.Context, priority int) ([]byte, error) {
+func (mq *MQ) Receive(ctx context.Context) ([]byte, int, error) {
 	var tm uintptr
 
 	timeout, ok := ctx.Deadline()
 	if ok {
 		t, err := unix.TimeToTimespec(timeout)
 		if err != nil {
-			return nil, err
+			return nil, -1, err
 		}
 		tm = uintptr(unsafe.Pointer(&t))
 	}
 
 	msgBuf := mq.BufPool.Get().([]byte)
 	defer mq.BufPool.Put(msgBuf)
+	var prio uint32
 
 	for {
 		n, _, errno := unix.Syscall6(
@@ -160,21 +186,36 @@ func (mq *MQ) Receive(ctx context.Context, priority int) ([]byte, error) {
 			mq.ptr,
 			uintptr(unsafe.Pointer(&msgBuf[0])),
 			uintptr(mq.MsgSize),
-			uintptr(priority),
+			uintptr(unsafe.Pointer(&prio)),
 			tm,
 			0,
 		)
 		if errno == 0 {
-			return msgBuf[:n], nil
+			out := make([]byte, n)
+			copy(out, msgBuf[:n])
+			return out, int(prio), nil
 		}
 		if errno != 0 {
-			return nil, errno
+			return nil, -1, errno
 		}
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, -1, ctx.Err()
 		default:
 			// continue retrying
 		}
 	}
+}
+
+func isValidQueueName(name string) bool {
+	if len(name) < 2 {
+		return false
+	}
+	if !strings.HasPrefix(name, "/") {
+		return false
+	}
+	if strings.Count(name, "/") > 1 {
+		return false
+	}
+	return true
 }

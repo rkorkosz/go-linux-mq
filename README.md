@@ -1,7 +1,8 @@
 [![Go](https://github.com/rkorkosz/go-linux-mq/actions/workflows/go.yml/badge.svg)](https://github.com/rkorkosz/go-linux-mq/actions/workflows/go.yml)
 
 # go-linux-mq
-Golang mqueue implementation
+Golang mqueue implementation. Linux only.
+`/dev/mqueue` kernel module required.
 
 ## Usage
 
@@ -10,11 +11,12 @@ package main
 
 import (
     "context"
+    "fmt"
     mq "github.com/rkorkosz/go-linux-mq"
 )
 
 func main() {
-    q, err := mq.New("myqueue")
+    q, err := mq.New("/myqueue")
     if err != nil {
         panic(err)
     }
@@ -29,7 +31,7 @@ func main() {
         panic(err)
     }
 
-    received, err := q.Receive(ctx, priority)
+    received, priority, err := q.Receive(ctx)
     if err != nil {
         panic(err)
     }

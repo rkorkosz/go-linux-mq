@@ -9,12 +9,12 @@ import (
 )
 
 func TestMQOpen(t *testing.T) {
-	mq, err := New("testopen")
+	mq, err := New("/testopen")
 
-	assertNoError(t, err)
+	requireNoError(t, err)
 
 	t.Cleanup(func() {
-		mq.Close()
+		mq.CloseAndUnlink()
 	})
 
 	if mq == nil {
@@ -24,7 +24,7 @@ func TestMQOpen(t *testing.T) {
 }
 
 func TestMQSendReceive(t *testing.T) {
-	mq, err := New("testopen")
+	mq, err := New("/testopen")
 
 	requireNoError(t, err)
 	if mq == nil {
@@ -33,7 +33,7 @@ func TestMQSendReceive(t *testing.T) {
 	}
 
 	t.Cleanup(func() {
-		mq.Close()
+		mq.CloseAndUnlink()
 	})
 
 	ctx := context.Background()
@@ -43,7 +43,7 @@ func TestMQSendReceive(t *testing.T) {
 	err = mq.Send(ctx, msg, 0)
 	requireNoError(t, err)
 
-	received, err := mq.Receive(ctx, 0)
+	received, _, err := mq.Receive(ctx)
 	requireNoError(t, err)
 
 	if !bytes.Equal(msg, received) {
@@ -52,10 +52,10 @@ func TestMQSendReceive(t *testing.T) {
 }
 
 func TestMQConcurrentSendReceive(t *testing.T) {
-	mq, err := New("testconcurrent")
+	mq, err := New("/testconcurrent")
 	requireNoError(t, err)
 	t.Cleanup(func() {
-		mq.Close()
+		mq.CloseAndUnlink()
 	})
 
 	ctx := context.Background()
@@ -78,7 +78,7 @@ func TestMQConcurrentSendReceive(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range msgCount {
-			received, err := mq.Receive(ctx, 0)
+			received, _, err := mq.Receive(ctx)
 			requireNoError(t, err)
 			expected := genMsg(i)
 			if !bytes.Equal(expected, received) {
